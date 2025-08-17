@@ -4,7 +4,33 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Luck IP</title>
-    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <!-- Firebase SDK -->
+    <script type="module">
+        // Import Firebase modules
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js';
+        import { getFirestore, doc, getDoc, setDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js';
+        
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyA4fhatF4D1V1w9_JZNI1fVHpjAHxt8h7g",
+            authDomain: "randotar-35bf7.firebaseapp.com",
+            projectId: "randotar-35bf7",
+            storageBucket: "randotar-35bf7.firebasestorage.app",
+            messagingSenderId: "109301915648",
+            appId: "1:109301915648:web:dfb093e59e0085939cf8e5"
+        };
+        
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        
+        // Make Firebase available globally
+        window.firebaseDB = db;
+        window.firebaseDoc = doc;
+        window.firebaseGetDoc = getDoc;
+        window.firebaseSetDoc = setDoc;
+        window.firebaseOnSnapshot = onSnapshot;
+    </script>
     <style>
         :root {
             --bg-color: #e6d5c0;
@@ -521,10 +547,31 @@
     </div>
 
     <script>
-        // Инициализация Supabase
-        const SUPABASE_URL = 'https://fzpfhuetylazrkkpopcl.supabase.co';
-        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ6cGZodWV0eWxhenJra3BvcGNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzk3MDI5MTUsImV4cCI6MjA1NTI3ODkxNX0.BhaSWyq5IKhxjTwP14Fw9D-TDe9OYHosXR1mzHA2jqI';
-        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        // Firebase references (initialized by module script)  
+        let fireDB, fireDoc, fireGetDoc, fireSetDoc, fireOnSnapshot;
+        
+        // Initialize Firebase references when DOM is ready
+        async function initializeFirebase() {
+            // Ждем пока Firebase модули загрузятся
+            let attempts = 0;
+            while (!window.firebaseDB && attempts < 50) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                attempts++;
+            }
+            
+            if (window.firebaseDB) {
+                fireDB = window.firebaseDB;
+                fireDoc = window.firebaseDoc;
+                fireGetDoc = window.firebaseGetDoc;
+                fireSetDoc = window.firebaseSetDoc;
+                fireOnSnapshot = window.firebaseOnSnapshot;
+                console.log('🔥 Firebase модули инициализированы успешно');
+                return true;
+            } else {
+                console.log('❌ Firebase модули не загрузились');
+                return false;
+            }
+        }
 
         let currentIP = null;
         let isSpinning = false;
@@ -561,54 +608,55 @@
             });
         }
 
-        // Загружаем сохраненные данные из Supabase
+        // Загружаем сохраненные данные из Firebase Firestore
         async function loadSavedScores() {
             try {
-                const { data, error } = await supabase
-                    .from('scores')
-                    .select('*')
-                    .single();
+                console.log('🔥 Firebase: Загружаем данные игры...');
+                const gameDocRef = fireDoc(fireDB, 'scores', 'game_data');
+                const docSnap = await fireGetDoc(gameDocRef);
                 
-                if (error) {
-                    throw error;
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    console.log('✅ Firebase: Данные загружены!', data);
+                    
+                    evenTotalScore = data.evenTotalScore || 0;
+                    oddTotalScore = data.oddTotalScore || 0;
+                    evenIPs = new Set(data.evenIPs || []);
+                    oddIPs = new Set(data.oddIPs || []);
+                    
+                    updateScoreDisplay('firebase');
+                } else {
+                    console.log('📝 Firebase: Создаем новый документ игры');
+                    // Создаем начальный документ
+                    await saveScores();
+                    updateScoreDisplay('firebase');
                 }
-                
-                if (data) {
-                    evenTotalScore = data.even_total_score || 0;
-                    oddTotalScore = data.odd_total_score || 0;
-                    evenIPs = new Set(data.even_ips || []);
-                    oddIPs = new Set(data.odd_ips || []);
-                }
-                
-                // Обновляем отображение
-                updateScoreDisplay();
             } catch (error) {
+                console.log('❌ Firebase ошибка:', error.message);
                 // При ошибке загружаем из localStorage
                 loadLocalScoresWithFallback();
             }
         }
 
-        // Сохраняем данные в Supabase
+        // Сохраняем данные в Firebase Firestore
         async function saveScores() {
             try {
-                const { error } = await supabase
-                    .from('scores')
-                    .upsert({
-                        id: 1,
-                        even_total_score: evenTotalScore,
-                        odd_total_score: oddTotalScore,
-                        even_ips: Array.from(evenIPs),
-                        odd_ips: Array.from(oddIPs),
-                        updated_at: new Date().toISOString()
-                    });
+                const gameDocRef = fireDoc(fireDB, 'scores', 'game_data');
+                const gameData = {
+                    evenTotalScore: evenTotalScore,
+                    oddTotalScore: oddTotalScore,
+                    evenIPs: Array.from(evenIPs),
+                    oddIPs: Array.from(oddIPs),
+                    lastUpdated: new Date().toISOString()
+                };
                 
-                if (error) {
-                    throw error;
-                }
+                await fireSetDoc(gameDocRef, gameData);
+                console.log('💾 Firebase: Данные сохранены!');
                 
                 // Сохраняем локальную копию
                 saveLocalScores();
             } catch (error) {
+                console.log('❌ Firebase: Ошибка сохранения:', error.message);
                 // При ошибке сохраняем только локально
                 saveLocalScores();
             }
@@ -624,14 +672,12 @@
                     oddTotalScore = data.oddTotalScore || 0;
                     evenIPs = new Set(data.evenIPs || []);
                     oddIPs = new Set(data.oddIPs || []);
-                    updateScoreDisplay();
+                    updateScoreDisplay('localStorage');
                 } else {
-                    // Если нет локальных данных, инициализируем пустыми значениями
-                    updateScoreDisplay();
+                    updateScoreDisplay('offline');
                 }
             } catch (error) {
-                // Если даже localStorage не работает, просто обновляем отображение
-                updateScoreDisplay();
+                updateScoreDisplay('offline');
             }
         }
 
@@ -645,7 +691,7 @@
                     oddTotalScore = data.oddTotalScore || 0;
                     evenIPs = new Set(data.evenIPs || []);
                     oddIPs = new Set(data.oddIPs || []);
-                    updateScoreDisplay();
+                    updateScoreDisplay('localStorage');
                 }
             } catch (error) {
                 // Игнорируем ошибки localStorage
@@ -670,35 +716,53 @@
         // Подписываемся на изменения в реальном времени
         function subscribeToScores() {
             try {
-                supabase
-                    .channel('scores')
-                    .on('postgres_changes', 
-                        { event: '*', schema: 'public', table: 'scores' }, 
-                        payload => {
-                            const newData = payload.new;
-                            if (newData) {
-                                evenTotalScore = newData.even_total_score;
-                                oddTotalScore = newData.odd_total_score;
-                                evenIPs = new Set(newData.even_ips);
-                                oddIPs = new Set(newData.odd_ips);
-                                updateScoreDisplay();
-                            }
-                        }
-                    )
-                    .subscribe();
+                const gameDocRef = fireDoc(fireDB, 'scores', 'game_data');
+                
+                fireOnSnapshot(gameDocRef, (doc) => {
+                    if (doc.exists()) {
+                        const data = doc.data();
+                        console.log('🔄 Firebase: Получено обновление данных');
+                        
+                        evenTotalScore = data.evenTotalScore || 0;
+                        oddTotalScore = data.oddTotalScore || 0;
+                        evenIPs = new Set(data.evenIPs || []);
+                        oddIPs = new Set(data.oddIPs || []);
+                        
+                        updateScoreDisplay('firebase');
+                    }
+                }, (error) => {
+                    console.log('❌ Firebase: Ошибка подписки:', error.message);
+                });
             } catch (error) {
-                // Игнорируем ошибки подписки
+                console.log('❌ Firebase: Не удалось подписаться на изменения');
             }
         }
 
-        // Обновляем отображение счёта
-        function updateScoreDisplay() {
-            document.getElementById('evenScore').textContent = evenTotalScore;
-            document.getElementById('oddScore').textContent = oddTotalScore;
+        // Обновляем отображение счёта с индикацией источника
+        function updateScoreDisplay(dataSource = 'offline') {
+            const evenScoreEl = document.getElementById('evenScore');
+            const oddScoreEl = document.getElementById('oddScore');
+            
+            // Индикатор источника данных
+            let sourceIcon = '';
+            if (dataSource === 'firebase') {
+                sourceIcon = ' 🔥'; // Firebase
+            } else if (dataSource === 'localStorage') {
+                sourceIcon = ' 💾'; // localStorage
+            } else {
+                sourceIcon = ' ❌'; // offline
+            }
+            
+            evenScoreEl.textContent = evenTotalScore + sourceIcon;
+            oddScoreEl.textContent = oddTotalScore + sourceIcon;
+            
+            // Обновляем списки IP
             document.getElementById('evenIPs').textContent = 
                 evenIPs.size > 0 ? `IP: ${Array.from(evenIPs).join(', ')}` : 'No players';
             document.getElementById('oddIPs').textContent = 
                 oddIPs.size > 0 ? `IP: ${Array.from(oddIPs).join(', ')}` : 'No players';
+            
+            console.log(`🎨 Счет обновлен (${dataSource}): Even=${evenTotalScore}, Odd=${oddTotalScore}`);
         }
 
         // Обновляем общий счёт (рефакторинг)
@@ -706,7 +770,7 @@
             if (!currentIP) return;
             
             updatePlayerScore(currentIP, points);
-            updateScoreDisplay();
+            updateScoreDisplay('firebase');
             saveScores(); // убрал await - сохраняем в фон для быстроты
         }
 
@@ -846,8 +910,17 @@
         // Инициализация
         async function initialize() {
             try {
+                console.log('🚀 Запуск игры...');
+                
+                // Инициализируем Firebase
+                initializeFirebase();
+                
+                // Ждем немного для загрузки Firebase модулей
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
                 // Сначала получаем IP
                 await getClientIP();
+                console.log('🌍 IP получен:', currentIP);
                 
                 // Инициализируем барабаны
                 await initializeReels();
@@ -1222,7 +1295,7 @@
                 // Используем уже готовую функцию для обновления очков
                 updatePlayerScore(currentIP, winnings);
                 
-                updateScoreDisplay();
+                updateScoreDisplay('firebase');
                 saveScores(); // тоже без await - в фон
                 
                 // Показываем чистый выигрыш (за вычетом стоимости спина)
