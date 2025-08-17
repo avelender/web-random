@@ -743,18 +743,18 @@
             const evenScoreEl = document.getElementById('evenScore');
             const oddScoreEl = document.getElementById('oddScore');
             
-            // Индикатор источника данных
-            let sourceIcon = '';
-            if (dataSource === 'firebase') {
-                sourceIcon = ' 🔥'; // Firebase
-            } else if (dataSource === 'localStorage') {
-                sourceIcon = ' 💾'; // localStorage
-            } else {
-                sourceIcon = ' ❌'; // offline
-            }
+            // Индикатор источника данных (закомментировано для отладки)
+            // let sourceIcon = '';
+            // if (dataSource === 'firebase') {
+            //     sourceIcon = ' 🔥'; // Firebase
+            // } else if (dataSource === 'localStorage') {
+            //     sourceIcon = ' 💾'; // localStorage
+            // } else {
+            //     sourceIcon = ' ❌'; // offline
+            // }
             
-            evenScoreEl.textContent = evenTotalScore + sourceIcon;
-            oddScoreEl.textContent = oddTotalScore + sourceIcon;
+            evenScoreEl.textContent = evenTotalScore; // + sourceIcon; (закомментировано)
+            oddScoreEl.textContent = oddTotalScore; // + sourceIcon; (закомментировано)
             
             // Обновляем списки IP
             document.getElementById('evenIPs').textContent = 
