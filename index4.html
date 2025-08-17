@@ -564,18 +564,14 @@
         // Загружаем сохраненные данные из Supabase
         async function loadSavedScores() {
             try {
-                console.log('Загружаем счет из Supabase...');
                 const { data, error } = await supabase
                     .from('scores')
                     .select('*')
                     .single();
                 
                 if (error) {
-                    console.error('Ошибка при загрузке из Supabase:', error);
                     throw error;
                 }
-                
-                console.log('Получены данные:', data);
                 
                 if (data) {
                     evenTotalScore = data.even_total_score || 0;
@@ -587,22 +583,14 @@
                 // Обновляем отображение
                 updateScoreDisplay();
             } catch (error) {
-                console.error('Ошибка при загрузке данных:', error);
                 // При ошибке загружаем из localStorage
-                loadLocalScores();
+                loadLocalScoresWithFallback();
             }
         }
 
         // Сохраняем данные в Supabase
         async function saveScores() {
             try {
-                console.log('Сохраняем в Supabase...', {
-                    evenTotalScore,
-                    oddTotalScore,
-                    evenIPs: Array.from(evenIPs),
-                    oddIPs: Array.from(oddIPs)
-                });
-
                 const { error } = await supabase
                     .from('scores')
                     .upsert({
@@ -615,22 +603,39 @@
                     });
                 
                 if (error) {
-                    console.error('Ошибка при сохранении в Supabase:', error);
                     throw error;
                 }
-                
-                console.log('Успешно сохранено в Supabase');
                 
                 // Сохраняем локальную копию
                 saveLocalScores();
             } catch (error) {
-                console.error('Ошибка при сохранении данных:', error);
                 // При ошибке сохраняем только локально
                 saveLocalScores();
             }
         }
 
-        // Загружаем из localStorage (резервная копия)
+        // Загружаем из localStorage с обработкой ошибок
+        async function loadLocalScoresWithFallback() {
+            try {
+                const savedData = localStorage.getItem('slotMachineScores');
+                if (savedData) {
+                    const data = JSON.parse(savedData);
+                    evenTotalScore = data.evenTotalScore || 0;
+                    oddTotalScore = data.oddTotalScore || 0;
+                    evenIPs = new Set(data.evenIPs || []);
+                    oddIPs = new Set(data.oddIPs || []);
+                    updateScoreDisplay();
+                } else {
+                    // Если нет локальных данных, инициализируем пустыми значениями
+                    updateScoreDisplay();
+                }
+            } catch (error) {
+                // Если даже localStorage не работает, просто обновляем отображение
+                updateScoreDisplay();
+            }
+        }
+
+        // Простая загрузка из localStorage
         function loadLocalScores() {
             try {
                 const savedData = localStorage.getItem('slotMachineScores');
@@ -643,7 +648,7 @@
                     updateScoreDisplay();
                 }
             } catch (error) {
-                console.error('Ошибка при загрузке из localStorage:', error);
+                // Игнорируем ошибки localStorage
             }
         }
 
@@ -658,28 +663,32 @@
                 };
                 localStorage.setItem('slotMachineScores', JSON.stringify(data));
             } catch (error) {
-                console.error('Ошибка при сохранении в localStorage:', error);
+                // Игнорируем ошибки localStorage
             }
         }
 
         // Подписываемся на изменения в реальном времени
         function subscribeToScores() {
-            console.log('Подписываемся на обновления...');
-            supabase
-                .channel('scores')
-                .on('postgres_changes', 
-                    { event: '*', schema: 'public', table: 'scores' }, 
-                    payload => {
-                        console.log('Получено обновление:', payload);
-                        const newData = payload.new;
-                        evenTotalScore = newData.even_total_score;
-                        oddTotalScore = newData.odd_total_score;
-                        evenIPs = new Set(newData.even_ips);
-                        oddIPs = new Set(newData.odd_ips);
-                        updateScoreDisplay();
-                    }
-                )
-                .subscribe();
+            try {
+                supabase
+                    .channel('scores')
+                    .on('postgres_changes', 
+                        { event: '*', schema: 'public', table: 'scores' }, 
+                        payload => {
+                            const newData = payload.new;
+                            if (newData) {
+                                evenTotalScore = newData.even_total_score;
+                                oddTotalScore = newData.odd_total_score;
+                                evenIPs = new Set(newData.even_ips);
+                                oddIPs = new Set(newData.odd_ips);
+                                updateScoreDisplay();
+                            }
+                        }
+                    )
+                    .subscribe();
+            } catch (error) {
+                // Игнорируем ошибки подписки
+            }
         }
 
         // Обновляем отображение счёта
@@ -692,12 +701,19 @@
                 oddIPs.size > 0 ? `IP: ${Array.from(oddIPs).join(', ')}` : 'No players';
         }
 
-        // Обновляем общий счёт
+        // Обновляем общий счёт (рефакторинг)
         async function updateTotalScore(points) {
             if (!currentIP) return;
             
-            const lastDigit = parseInt(currentIP.split('.').pop());
-            const lastOctet = currentIP.split('.').pop();
+            updatePlayerScore(currentIP, points);
+            updateScoreDisplay();
+            saveScores(); // убрал await - сохраняем в фон для быстроты
+        }
+
+        // Вынесенная логика обновления очков игрока
+        function updatePlayerScore(ip, points) {
+            const lastDigit = parseInt(ip.split('.').pop());
+            const lastOctet = ip.split('.').pop();
 
             if (lastDigit % 2 === 0) {
                 evenTotalScore += points;
@@ -706,25 +722,17 @@
                 oddTotalScore += points;
                 oddIPs.add(lastOctet);
             }
-            
-            // Обновляем отображение и сохраняем
-            updateScoreDisplay();
-            await saveScores();
         }
 
         // Функция для получения IP
         async function getClientIP() {
             try {
-                console.log('Получаем IP адрес...');
                 const response = await fetch('https://api.ipify.org?format=json');
                 const data = await response.json();
                 currentIP = data.ip;
-                console.log('Получен IP:', currentIP);
             } catch (error) {
-                console.error('Ошибка при получении IP:', error);
                 // Если не удалось получить IP, используем случайное число
                 currentIP = Math.floor(Math.random() * 256).toString();
-                console.log('Используем случайный IP:', currentIP);
             }
         }
 
@@ -732,9 +740,8 @@
         function saveBonusTime(nextBonusTime) {
             try {
                 localStorage.setItem('nextBonusTime', nextBonusTime.toString());
-                console.log('Сохранено время бонуса:', new Date(nextBonusTime).toLocaleString());
             } catch (error) {
-                console.error('Ошибка при сохранении времени бонуса:', error);
+                // Игнорируем ошибки сохранения
             }
         }
 
@@ -742,10 +749,8 @@
         function loadBonusTime() {
             try {
                 const savedTime = localStorage.getItem('nextBonusTime');
-                console.log('Загружено время бонуса:', savedTime ? new Date(parseInt(savedTime)).toLocaleString() : 'не найдено');
                 return savedTime ? parseInt(savedTime) : null;
             } catch (error) {
-                console.error('Ошибка при загрузке времени бонуса:', error);
                 return null;
             }
         }
@@ -756,27 +761,20 @@
 
         // Функция для получения бонуса
         async function claimBonus() {
-            console.log('Нажата кнопка бонуса');
-            
             try {
                 if (!currentIP) {
                     // Пробуем получить IP
                     const response = await fetch('https://api.ipify.org?format=json');
                     const data = await response.json();
                     currentIP = data.ip;
-                    console.log('Получен IP:', currentIP);
                 }
 
                 if (!currentIP) {
-                    console.error('IP не определен');
                     return;
                 }
 
-                console.log('Текущий IP:', currentIP);
-
                 // Добавляем 100 очков в соответствующий счетчик
                 await updateTotalScore(100);
-                console.log('Очки начислены');
                 
                 // Отключаем кнопку и запускаем таймер
                 bonusButton.disabled = true;
@@ -785,8 +783,6 @@
                 const waitTime = getRandomInt(15, 120);
                 const nextBonusTime = Date.now() + (waitTime * 1000);
                 
-                console.log(`Установлен таймер на ${waitTime} секунд до ${new Date(nextBonusTime).toLocaleString()}`);
-                
                 // Сохраняем время следующего бонуса
                 localStorage.setItem('nextBonusTime', nextBonusTime.toString());
                 
@@ -794,15 +790,12 @@
                 startBonusTimer(nextBonusTime);
                 addHistoryItem('bonus', `Bonus received: +100 points`);
             } catch (error) {
-                console.error('Ошибка при получении бонуса:', error);
                 activateBonus(); // В случае ошибки активируем кнопку
             }
         }
 
         // Функция для запуска таймера бонуса
         function startBonusTimer(nextBonusTime) {
-            console.log('Запуск таймера');
-            
             // Очищаем предыдущий интервал если есть
             if (timerInterval) {
                 clearInterval(timerInterval);
@@ -812,10 +805,8 @@
             function updateTimer() {
                 const now = Date.now();
                 const timeLeft = Math.max(0, Math.ceil((nextBonusTime - now) / 1000));
-                console.log('Осталось секунд:', timeLeft);
                 
                 if (timeLeft <= 0) {
-                    console.log('Время истекло, активируем бонус');
                     clearInterval(timerInterval);
                     activateBonus();
                 } else {
@@ -827,12 +818,10 @@
             // Сразу обновляем и запускаем таймер
             updateTimer();
             timerInterval = setInterval(updateTimer, 1000);
-            console.log('Таймер запущен');
         }
 
         // Функция для активации бонусной кнопки
         function activateBonus() {
-            console.log('Активация бонусной кнопки');
             if (timerInterval) {
                 clearInterval(timerInterval);
                 timerInterval = null;
@@ -840,7 +829,6 @@
             bonusButton.disabled = false;
             bonusTimer.textContent = 'Bonus available!';
             localStorage.removeItem('nextBonusTime');
-            console.log('Бонусная кнопка активирована');
         }
 
         // Функция для получения случайного числа в диапазоне
@@ -858,46 +846,32 @@
         // Инициализация
         async function initialize() {
             try {
-                console.log('Начало инициализации...');
-                
                 // Сначала получаем IP
                 await getClientIP();
-                console.log('IP получен:', currentIP);
                 
                 // Инициализируем барабаны
                 await initializeReels();
-                console.log('Барабаны инициализированы');
                 
                 // Загружаем сохраненные очки
                 await loadSavedScores();
-                console.log('Очки загружены');
                 
                 // Подписываемся на обновления
                 subscribeToScores();
-                console.log('Подписка на обновления активирована');
                 
                 // Инициализируем кнопку спина
                 const spinButton = document.querySelector('.spin-button');
                 if (spinButton) {
-                    console.log('Кнопка спина найдена');
                     spinButton.addEventListener('click', () => {
-                        console.log('Клик по кнопке спина');
                         spin();
                     });
-                } else {
-                    console.error('Кнопка спина не найдена');
                 }
                 
                 // Инициализируем элементы бонусной системы
                 bonusButton = document.getElementById('bonusButton');
                 if (bonusButton) {
-                    console.log('Кнопка бонуса найдена');
                     bonusButton.addEventListener('click', () => {
-                        console.log('Клик по кнопке бонуса');
                         claimBonus();
                     });
-                } else {
-                    console.error('Кнопка бонуса не найдена');
                 }
                 bonusTimer = document.getElementById('bonusTimer');
                 
@@ -928,10 +902,8 @@
                 // Вызываем сразу и при изменении размера окна
                 syncHistoryHeight();
                 window.addEventListener('resize', syncHistoryHeight);
-                
-                console.log('Инициализация завершена успешно');
             } catch (error) {
-                console.error('Ошибка при инициализации:', error);
+                // Игнорируем ошибки инициализации
             }
         }
 
@@ -1033,7 +1005,6 @@
 
             // Проверяем IP
             if (!currentIP) {
-                console.error('IP не определен');
                 return;
             }
 
@@ -1057,12 +1028,13 @@
                 oddIPs.add(currentIP.split('.').pop());
             }
 
-            // Обновляем отображение и сохраняем
-            updateScoreDisplay();
-            await saveScores();
-            
+            // СРАЗУ запускаем анимацию для мгновенного отклика
             isSpinning = true;
             clearWinLines();
+            
+            // Обновляем отображение и сохраняем В ФОНЕ
+            updateScoreDisplay();
+            saveScores(); // убрал await - пусть сохраняется асинхронно
             
             const reelStrips = document.querySelectorAll('.reel-strip');
             const button = document.querySelector('.spin-button');
@@ -1247,20 +1219,12 @@
             }
 
             if(winnings > 0) {
-                const lastDigit = parseInt(currentIP.split('.').pop());
-                const isEven = lastDigit % 2 === 0;
-                
-                if(isEven) {
-                    evenTotalScore += winnings;
-                    evenIPs.add(currentIP.split('.').pop());
-                } else {
-                    oddTotalScore += winnings;
-                    oddIPs.add(currentIP.split('.').pop());
-                }
+                // Используем уже готовую функцию для обновления очков
+                updatePlayerScore(currentIP, winnings);
                 
                 updateScoreDisplay();
-                saveScores();
-
+                saveScores(); // тоже без await - в фон
+                
                 // Показываем чистый выигрыш (за вычетом стоимости спина)
                 const netWin = winnings - 100;
                 if (netWin > 0) {
